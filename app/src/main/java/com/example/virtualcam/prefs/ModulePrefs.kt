@@ -33,7 +33,8 @@ enum class SourceType(val storageValue: String) {
     VIDEO("video");
 
     companion object {
-        fun fromStorage(value: String?): SourceType = values().firstOrNull { it.storageValue == value } ?: IMAGE
+        fun fromStorage(value: String?): SourceType =
+            values().firstOrNull { it.storageValue == value } ?: IMAGE
     }
 }
 
@@ -42,7 +43,8 @@ enum class ScaleMode(val storageValue: String) {
     CENTER_CROP("CENTER_CROP");
 
     companion object {
-        fun fromStorage(value: String?): ScaleMode = values().firstOrNull { it.storageValue == value } ?: FIT
+        fun fromStorage(value: String?): ScaleMode =
+            values().firstOrNull { it.storageValue == value } ?: FIT
     }
 }
 
@@ -53,7 +55,8 @@ enum class OrientationOption(val storageValue: String, val degrees: Int?) {
     DEG_270("270", 270);
 
     companion object {
-        fun fromStorage(value: String?): OrientationOption = values().firstOrNull { it.storageValue == value } ?: AUTO
+        fun fromStorage(value: String?): OrientationOption =
+            values().firstOrNull { it.storageValue == value } ?: AUTO
     }
 }
 
@@ -63,7 +66,8 @@ enum class FrameFormat(val storageValue: String) {
     JPEG("JPEG");
 
     companion object {
-        fun fromStorage(value: String?): FrameFormat = values().firstOrNull { it.storageValue == value } ?: NV21
+        fun fromStorage(value: String?): FrameFormat =
+            values().firstOrNull { it.storageValue == value } ?: NV21
     }
 }
 
@@ -74,7 +78,8 @@ enum class ApiPriority(val storageValue: String) {
     CAMERAX("CameraX");
 
     companion object {
-        fun fromStorage(value: String?): ApiPriority = values().firstOrNull { it.storageValue == value } ?: AUTO
+        fun fromStorage(value: String?): ApiPriority =
+            values().firstOrNull { it.storageValue == value } ?: AUTO
     }
 }
 
@@ -83,7 +88,8 @@ enum class VideoMode(val storageValue: String) {
     CODEC("Codec");
 
     companion object {
-        fun fromStorage(value: String?): VideoMode = values().firstOrNull { it.storageValue == value } ?: MMR
+        fun fromStorage(value: String?): VideoMode =
+            values().firstOrNull { it.storageValue == value } ?: MMR
     }
 }
 
@@ -107,7 +113,7 @@ data class ModuleSettings(
 class ModulePrefs private constructor(context: Context) {
 
     // GREP: PREFS_DPS_WORLD_READABLE
-    private val baseContext: Context = context
+    private val baseContext: Context = context.applicationContext ?: context
     private val dpsContext: Context = baseContext.createDeviceProtectedStorageContext()
     private val prefs: SharedPreferences
 
@@ -128,7 +134,7 @@ class ModulePrefs private constructor(context: Context) {
     private fun ensureWorldReadable() {
         val file = File(dpsContext.dataDir, "shared_prefs/${PrefKeys.PREF_FILE}.xml")
         if (file.exists()) {
-            val readable = file.setReadable(true, false)
+            val readable = file.setReadable(true, /* ownerOnly = */ false)
             if (!readable) {
                 logVcam("ModulePrefs failed to mark prefs world-readable")
             }
@@ -139,23 +145,36 @@ class ModulePrefs private constructor(context: Context) {
         val uriString = prefs.getString(PrefKeys.SOURCE_URI, null)
         return ModuleSettings(
             enabled = prefs.getBoolean(PrefKeys.ENABLED, false),
-            sourceType = SourceType.fromStorage(prefs.getString(PrefKeys.SOURCE_TYPE, SourceType.IMAGE.storageValue)),
-            sourceUri = uriString?.let { Uri.parse(it) },
-            scaleMode = ScaleMode.fromStorage(prefs.getString(PrefKeys.SCALE_MODE, ScaleMode.FIT.storageValue)),
+            sourceType = SourceType.fromStorage(
+                prefs.getString(PrefKeys.SOURCE_TYPE, SourceType.IMAGE.storageValue)
+            ),
+            sourceUri = uriString?.let(Uri::parse),
+            scaleMode = ScaleMode.fromStorage(
+                prefs.getString(PrefKeys.SCALE_MODE, ScaleMode.FIT.storageValue)
+            ),
             manualWidth = prefs.getInt(PrefKeys.MANUAL_W, 0).let { if (it <= 0) null else it },
             manualHeight = prefs.getInt(PrefKeys.MANUAL_H, 0).let { if (it <= 0) null else it },
             fps = prefs.getFloat(PrefKeys.FPS, 30f),
-            orientation = OrientationOption.fromStorage(prefs.getString(PrefKeys.ORIENTATION, OrientationOption.AUTO.storageValue)),
+            orientation = OrientationOption.fromStorage(
+                prefs.getString(PrefKeys.ORIENTATION, OrientationOption.AUTO.storageValue)
+            ),
             mirror = prefs.getBoolean(PrefKeys.MIRROR, false),
-            format = FrameFormat.fromStorage(prefs.getString(PrefKeys.FORMAT, FrameFormat.NV21.storageValue)),
-            apiPriority = ApiPriority.fromStorage(prefs.getString(PrefKeys.API_PRIORITY, ApiPriority.AUTO.storageValue)),
-            videoMode = VideoMode.fromStorage(prefs.getString(PrefKeys.VIDEO_MODE, VideoMode.MMR.storageValue)),
+            format = FrameFormat.fromStorage(
+                prefs.getString(PrefKeys.FORMAT, FrameFormat.NV21.storageValue)
+            ),
+            apiPriority = ApiPriority.fromStorage(
+                prefs.getString(PrefKeys.API_PRIORITY, ApiPriority.AUTO.storageValue)
+            ),
+            videoMode = VideoMode.fromStorage(
+                prefs.getString(PrefKeys.VIDEO_MODE, VideoMode.MMR.storageValue)
+            ),
             injectCam2Preview = prefs.getBoolean(PrefKeys.INJECT_CAM2_PREVIEW, false),
             verbose = prefs.getBoolean(PrefKeys.VERBOSE, false)
         )
     }
 
     fun write(settings: ModuleSettings) {
+        // commit=true, чтобы успеть проставить права файла сразу после записи
         prefs.edit(commit = true) {
             putBoolean(PrefKeys.ENABLED, settings.enabled)
             putString(PrefKeys.SOURCE_TYPE, settings.sourceType.storageValue)
@@ -188,18 +207,20 @@ class ModulePrefs private constructor(context: Context) {
 
         private fun resolveModuleContext(context: Context): Context {
             val appContext = context.applicationContext ?: context
-            if (appContext.packageName == BuildConfig.APPLICATION_ID) {
-                return appContext
-            }
-            return try {
-                val pkgContext = appContext.createPackageContext(
-                    BuildConfig.APPLICATION_ID,
-                    Context.CONTEXT_IGNORE_SECURITY
-                )
-                pkgContext.applicationContext ?: pkgContext
-            } catch (err: Exception) {
-                logVcam("ModulePrefs: createPackageContext failed (${err.message}); using caller context")
+            // Избегаем хардкода имени пакета, используем Application ID из сборки
+            return if (appContext.packageName == BuildConfig.APPLICATION_ID) {
                 appContext
+            } else {
+                try {
+                    val pkgContext = appContext.createPackageContext(
+                        BuildConfig.APPLICATION_ID,
+                        Context.CONTEXT_IGNORE_SECURITY
+                    )
+                    pkgContext.applicationContext ?: pkgContext
+                } catch (err: Exception) {
+                    logVcam("ModulePrefs: createPackageContext failed (${err.message}); using caller context")
+                    appContext
+                }
             }
         }
     }

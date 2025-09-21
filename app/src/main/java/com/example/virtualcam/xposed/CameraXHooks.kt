@@ -3,7 +3,9 @@ package com.example.virtualcam.xposed
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
+import android.media.Image
 import android.view.Surface
+import androidx.camera.core.ImageInfo
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.impl.TagBundle
 import com.example.virtualcam.logVcam
@@ -28,7 +30,7 @@ object CameraXHooks {
     private fun hookImageAnalysis(classLoader: ClassLoader) {
         try {
             val analysisClass = XposedHelpers.findClass("androidx.camera.core.ImageAnalysis", classLoader)
-            val analyzerInterface = Class.forName("androidx.camera.core.ImageAnalysis$Analyzer", false, classLoader)
+            val analyzerInterface = Class.forName("androidx.camera.core.ImageAnalysis\$Analyzer", false, classLoader)
             XposedHelpers.findAndHookMethod(
                 analysisClass,
                 "setAnalyzer",
@@ -81,7 +83,7 @@ object CameraXHooks {
     private fun hookImageCapture(classLoader: ClassLoader) {
         try {
             val captureClass = XposedHelpers.findClass("androidx.camera.core.ImageCapture", classLoader)
-            val callbackInterface = Class.forName("androidx.camera.core.ImageCapture$OnImageCapturedCallback", false, classLoader)
+            val callbackInterface = Class.forName("androidx.camera.core.ImageCapture\$OnImageCapturedCallback", false, classLoader)
             XposedHelpers.findAndHookMethod(
                 captureClass,
                 "takePicture",
@@ -168,11 +170,13 @@ private class VirtualCamImageProxy(
 
     override fun getHeight(): Int = height
 
-    override fun getImageInfo(): ImageProxy.ImageInfo = object : ImageProxy.ImageInfo {
-        override fun getTimestamp(): Long = timestampUs
-        override fun getTagBundle(): androidx.camera.core.impl.TagBundle = androidx.camera.core.impl.TagBundle.emptyBundle()
-        override fun getSensorToBufferTransformMatrix(): android.graphics.Matrix = android.graphics.Matrix()
-        override fun getRotationDegrees(): Int = 0
+    override fun getImage(): Image? = null
+
+    override fun getImageInfo(): ImageInfo = object : ImageInfo {
+        override val timestamp: Long = timestampUs
+        override val tagBundle: TagBundle = TagBundle.emptyBundle()
+        override val sensorToBufferTransformMatrix: Matrix = Matrix()
+        override val rotationDegrees: Int = 0
     }
 
     override fun getPlanes(): Array<ImageProxy.PlaneProxy> = planes
@@ -202,7 +206,7 @@ private class VirtualCamImageProxy(
             yBuffer.flip()
             uBuffer.flip()
             vBuffer.flip()
-            val planes = arrayOf(
+            val planes = arrayOf<ImageProxy.PlaneProxy>(
                 SimplePlaneProxy(yBuffer.asReadOnlyBuffer(), width, 1),
                 SimplePlaneProxy(uBuffer.asReadOnlyBuffer(), width / 2, 1),
                 SimplePlaneProxy(vBuffer.asReadOnlyBuffer(), width / 2, 1)

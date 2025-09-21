@@ -3,6 +3,7 @@ package com.example.virtualcam.ui
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -14,13 +15,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.example.virtualcam.BuildConfig
 import com.example.virtualcam.ui.theme.VirtualCamTheme
 
 // GREP: UI_ABOUT
@@ -39,6 +37,21 @@ class AboutActivity : ComponentActivity() {
 private fun AboutScreen() {
     val context = LocalContext.current
     val repoLink = "https://github.com/example/virtualcam"
+    val versionName = remember {
+        val packageManager = context.packageManager
+        val packageName = context.packageName
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    android.content.pm.PackageManager.PackageInfoFlags.of(0)
+                ).versionName
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }
+        }.getOrNull() ?: "-"
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -46,7 +59,7 @@ private fun AboutScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(text = "VirtualCam", style = MaterialTheme.typography.headlineMedium)
-        Text(text = "Version: ${BuildConfig.VERSION_NAME}")
+        Text(text = "Version: $versionName")
         Text(text = "License: Apache-2.0")
         Text(
             text = "Репозиторий:",

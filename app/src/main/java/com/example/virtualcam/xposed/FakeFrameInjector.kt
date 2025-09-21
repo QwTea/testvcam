@@ -7,6 +7,7 @@ import android.graphics.ImageFormat
 import android.hardware.Camera
 import android.media.Image
 import android.net.Uri
+import android.os.Handler
 import android.os.SystemClock
 import android.util.Size
 import android.view.Surface
@@ -135,7 +136,7 @@ object FakeFrameInjector {
     private fun installCamera2Hooks(classLoader: ClassLoader) {
         if (installedCamera2.getAndSet(true)) return
         try {
-            val stateCallbackClass = Class.forName("android.hardware.camera2.CameraCaptureSession$StateCallback", false, classLoader)
+            val stateCallbackClass = Class.forName("android.hardware.camera2.CameraCaptureSession\$StateCallback", false, classLoader)
             val cameraDeviceClass = XposedHelpers.findClass("android.hardware.camera2.CameraDevice", classLoader)
             XposedHelpers.findAndHookMethod(
                 cameraDeviceClass,

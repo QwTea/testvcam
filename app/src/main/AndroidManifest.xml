@@ -1,0 +1,57 @@
+<!-- GREP: MANIFEST_VIRTUALCAM -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.virtualcam">
+
+    <application
+        android:name="com.example.virtualcam.VirtualCamApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="VirtualCam"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VirtualCam">
+
+        <activity
+            android:name="com.example.virtualcam.ui.AboutActivity"
+            android:exported="false"
+            android:label="About" />
+        <activity
+            android:name="com.example.virtualcam.ui.DiagnosticsActivity"
+            android:exported="false"
+            android:label="Diagnostics" />
+        <activity
+            android:name="com.example.virtualcam.ui.HistoryActivity"
+            android:exported="false"
+            android:label="History" />
+        <activity
+            android:name="com.example.virtualcam.ui.MainActivity"
+            android:exported="true"
+            android:label="VirtualCam">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="com.example.virtualcam.provider.VirtualCamProvider"
+            android:authorities="com.example.virtualcam.provider"
+            android:enabled="true"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:readPermission="android.permission.READ_EXTERNAL_STORAGE"
+            android:writePermission="android.permission.READ_EXTERNAL_STORAGE" />
+
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Virtual camera stream substitution" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+    </application>
+</manifest>

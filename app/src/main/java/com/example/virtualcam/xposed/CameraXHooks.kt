@@ -3,6 +3,7 @@ package com.example.virtualcam.xposed
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
+import android.media.Image
 import android.view.Surface
 import com.example.virtualcam.logVcam
 import de.robv.android.xposed.XC_MethodHook
@@ -130,7 +131,10 @@ object CameraXHooks {
                                     original
                                 }
                                 DiagnosticsState.update {
-                                    it.copy(activePath = "CameraX", previewSize = "${width}x${height}")
+                                    it.copy(
+                                        activePath = "CameraX",
+                                        previewSize = "${width}x${height}"
+                                    )
                                 }
                                 if (data != null) {
                                     types.close(original)
@@ -166,9 +170,11 @@ object CameraXHooks {
                         if (settings?.injectCam2Preview != true) return
                         val originalSurface = param.args[0] as Surface
                         val dummy = com.example.virtualcam.util.makeDummySurface()
-                        com.example.virtualcam.util.startSurfacePainter(originalSurface, {
-                            FakeFrameInjector.acquireBitmap(1280, 720)
-                        }, settings.fps)
+                        com.example.virtualcam.util.startSurfacePainter(
+                            originalSurface,
+                            { FakeFrameInjector.acquireBitmap(1280, 720) },
+                            settings.fps
+                        )
                         DiagnosticsState.update {
                             it.copy(
                                 activePath = "CameraX",
@@ -343,20 +349,24 @@ private class ImageInfoHandler(
 }
 
 private class CameraXTypes(val classLoader: ClassLoader) {
-    val imageAnalysisClass: Class<*> = XposedHelpers.findClass("androidx.camera.core.ImageAnalysis", classLoader)
-    val analyzerInterface: Class<*> = Class.forName("androidx.camera.core.ImageAnalysis\$Analyzer", false, classLoader)
-    val imageCaptureClass: Class<*> = XposedHelpers.findClass("androidx.camera.core.ImageCapture", classLoader)
-    val onImageCapturedCallbackClass: Class<*> = Class.forName(
-        "androidx.camera.core.ImageCapture\$OnImageCapturedCallback",
-        false,
-        classLoader
-    )
-    val imageProxyClass: Class<*> = Class.forName("androidx.camera.core.ImageProxy", false, classLoader)
+    val imageAnalysisClass: Class<*> =
+        XposedHelpers.findClass("androidx.camera.core.ImageAnalysis", classLoader)
+    val analyzerInterface: Class<*> =
+        Class.forName("androidx.camera.core.ImageAnalysis\$Analyzer", false, classLoader)
+    val imageCaptureClass: Class<*> =
+        XposedHelpers.findClass("androidx.camera.core.ImageCapture", classLoader)
+    val onImageCapturedCallbackClass: Class<*> =
+        Class.forName("androidx.camera.core.ImageCapture\$OnImageCapturedCallback", false, classLoader)
+    val imageProxyClass: Class<*> =
+        Class.forName("androidx.camera.core.ImageProxy", false, classLoader)
+
     private val planesMethod: Method? = runCatching { imageProxyClass.getMethod("getPlanes") }.getOrNull()
     val planeProxyClass: Class<*> = planesMethod?.returnType?.componentType
         ?: imageProxyClass.declaredClasses.firstOrNull { it.simpleName == "PlaneProxy" }
         ?: Class.forName("androidx.camera.core.ImageProxy\$PlaneProxy", false, classLoader)
-    private val imageInfoMethodInternal: Method? = runCatching { imageProxyClass.getMethod("getImageInfo") }.getOrNull()
+
+    private val imageInfoMethodInternal: Method? =
+        runCatching { imageProxyClass.getMethod("getImageInfo") }.getOrNull()
     val imageInfoMethod: Method? = imageInfoMethodInternal
     private val rawImageInfoType: Class<*>? = imageInfoMethodInternal?.returnType
         ?: runCatching { Class.forName("androidx.camera.core.ImageInfo", false, classLoader) }.getOrNull()
@@ -366,23 +376,30 @@ private class CameraXTypes(val classLoader: ClassLoader) {
         rawImageInfoType.interfaces.isNotEmpty() -> rawImageInfoType.interfaces[0]
         else -> null
     }
+
     val widthMethod: Method = imageProxyClass.getMethod("getWidth")
     val heightMethod: Method = imageProxyClass.getMethod("getHeight")
     val closeMethod: Method = imageProxyClass.getMethod("close")
+
     private val tagBundleClass: Class<*>? = runCatching {
         Class.forName("androidx.camera.core.impl.TagBundle", false, classLoader)
     }.getOrNull()
     private val emptyTagBundleMethod = tagBundleClass?.getMethod("emptyBundle")
     val emptyTagBundle: Any? = emptyTagBundleMethod?.invoke(null)
+
     private val infoClass = rawImageInfoType
+
     private val timestampMethods: List<Method> = infoClass?.methods?.filter {
-        it.parameterCount == 0 && (it.returnType == Long::class.javaPrimitiveType || it.returnType == java.lang.Long::class.java) &&
+        it.parameterCount == 0 &&
+            (it.returnType == Long::class.javaPrimitiveType || it.returnType == java.lang.Long::class.java) &&
             it.name.contains("timestamp", ignoreCase = true)
     } ?: emptyList()
+
     private val timestampFields: List<Field> = infoClass?.declaredFields?.filter {
         (it.type == Long::class.javaPrimitiveType || it.type == java.lang.Long::class.java) &&
             it.name.contains("timestamp", ignoreCase = true)
     } ?: emptyList()
+
     private val tagBundleMethod: Method? = infoClass?.methods?.firstOrNull {
         it.parameterCount == 0 && tagBundleClass?.isAssignableFrom(it.returnType) == true &&
             it.name.contains("tag", ignoreCase = true)
@@ -390,16 +407,20 @@ private class CameraXTypes(val classLoader: ClassLoader) {
     private val tagBundleField: Field? = infoClass?.declaredFields?.firstOrNull {
         tagBundleClass?.isAssignableFrom(it.type) == true
     }
+
     private val rotationMethod: Method? = infoClass?.methods?.firstOrNull {
-        it.parameterCount == 0 && (it.returnType == Int::class.javaPrimitiveType || it.returnType == java.lang.Integer::class.java) &&
+        it.parameterCount == 0 &&
+            (it.returnType == Int::class.javaPrimitiveType || it.returnType == java.lang.Integer::class.java) &&
             it.name.contains("rotation", ignoreCase = true)
     }
     private val rotationField: Field? = infoClass?.declaredFields?.firstOrNull {
         (it.type == Int::class.javaPrimitiveType || it.type == java.lang.Integer::class.java) &&
             it.name.contains("rotation", ignoreCase = true)
     }
+
     private val transformMethod: Method? = infoClass?.methods?.firstOrNull {
-        it.parameterCount == 0 && Matrix::class.java.isAssignableFrom(it.returnType) &&
+        it.parameterCount == 0 &&
+            Matrix::class.java.isAssignableFrom(it.returnType) &&
             it.name.contains("transform", ignoreCase = true)
     }
     private val transformField: Field? = infoClass?.declaredFields?.firstOrNull {

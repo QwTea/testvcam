@@ -40,9 +40,7 @@
             android:authorities="com.example.virtualcam.provider"
             android:enabled="true"
             android:exported="true"
-            android:grantUriPermissions="true"
-            android:readPermission="android.permission.READ_EXTERNAL_STORAGE"
-            android:writePermission="android.permission.READ_EXTERNAL_STORAGE" />
+            android:grantUriPermissions="true" />
 
         <meta-data
             android:name="xposedmodule"

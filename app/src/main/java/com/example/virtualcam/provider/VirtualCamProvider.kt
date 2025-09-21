@@ -45,7 +45,7 @@ class VirtualCamProvider : ContentProvider() {
         val context = context ?: throw FileNotFoundException("No context")
         val settings = ModulePrefs.getInstance(context).read()
         val sourceUri = settings.sourceUri ?: throw FileNotFoundException("Source not configured")
-        if (uri.path != "/selected") {
+        if (uri.path != SELECTED_PATH) {
             throw FileNotFoundException("Unsupported path: ${uri.path}")
         }
         val callingPkg = callingPackage
@@ -58,5 +58,11 @@ class VirtualCamProvider : ContentProvider() {
             }
         }
         return context.contentResolver.openFileDescriptor(sourceUri, mode)
+    }
+
+    companion object {
+        const val AUTHORITY: String = "com.example.virtualcam.provider"
+        private const val SELECTED_PATH: String = "/selected"
+        val SELECTED_URI: Uri = Uri.parse("content://$AUTHORITY$SELECTED_PATH")
     }
 }

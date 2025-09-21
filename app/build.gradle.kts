@@ -1,4 +1,5 @@
 // GREP: GRADLE_APP
+import org.jetbrains.kotlin.gradle.internal.KaptWithoutKotlincTask
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -115,4 +116,13 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.06.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+}
+
+val sqliteTmpDir = layout.buildDirectory.dir("tmp/sqlite-jdbc")
+
+tasks.withType<KaptWithoutKotlincTask>().configureEach {
+    kaptProcessJvmArgs.add("-Dorg.sqlite.tmpdir=${sqliteTmpDir.get().asFile.absolutePath}")
+    doFirst {
+        sqliteTmpDir.get().asFile.mkdirs()
+    }
 }

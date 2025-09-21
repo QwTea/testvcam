@@ -399,7 +399,12 @@ object FakeFrameInjector {
     }
 
     private fun recordLegacySession(camera: Camera, width: Int, height: Int) {
-        legacySessions.getOrPut(camera) { LegacyCameraSession() }.previewSize = Size(width, height)
+        val session = legacySessions.getOrPut(camera) { LegacyCameraSession() }
+        session.previewSize = Size(width, height)
+        val texture = session.attachedSurfaceTexture
+        if (texture != null && texture !== session.dummySurfaceTexture) {
+            runCatching { texture.setDefaultBufferSize(width, height) }
+        }
         DiagnosticsState.update {
             it.copy(
                 activePath = "Legacy",

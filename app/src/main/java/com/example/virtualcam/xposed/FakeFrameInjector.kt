@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.hardware.Camera
 import android.media.Image
 import android.net.Uri
@@ -11,6 +12,7 @@ import android.os.Handler
 import android.os.SystemClock
 import android.util.Size
 import android.view.Surface
+import android.view.SurfaceHolder
 import com.example.virtualcam.logVcam
 import com.example.virtualcam.prefs.ModulePrefs
 import com.example.virtualcam.prefs.ModuleSettings
@@ -36,6 +38,9 @@ object FakeFrameInjector {
     private val painterThreads = ConcurrentHashMap<Surface, Thread>()
     private val installedLegacy = AtomicBoolean(false)
     private val installedCamera2 = AtomicBoolean(false)
+    private val suppressPreviewTexture = object : ThreadLocal<Boolean>() {
+        override fun initialValue(): Boolean = false
+    }
 
     private var appContext: Context? = null
     private var lastSettingsSignature: String? = null
@@ -96,6 +101,65 @@ object FakeFrameInjector {
                     }
                 })
 
+            XposedHelpers.findAndHookMethod(cameraClass, "setPreviewTexture", SurfaceTexture::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (suppressPreviewTexture.get()) return
+                        val camera = param.thisObject as Camera
+                        val texture = param.args[0] as? SurfaceTexture
+                        val session = legacySessions.getOrPut(camera) { LegacyCameraSession() }
+                        if (texture == null) {
+                            clearLegacySession(session)
+                            return
+                        }
+                        refreshSettings()
+                        val targetSurface = if (session.ownsPreviewSurface && session.attachedSurfaceTexture === texture && session.previewSurface != null) {
+                            session.previewSurface!!
+                        } else {
+                            Surface(texture).also { session.attachedSurfaceTexture = texture }
+                        }
+                        session.attachedSurfaceTexture = texture
+                        session.updatePreviewSurface(targetSurface, ownsSurface = true)
+                        param.args[0] = session.obtainDummySurfaceTexture()
+                        markLegacyPathActive(camera)
+                    }
+                })
+
+            XposedHelpers.findAndHookMethod(cameraClass, "setPreviewDisplay", SurfaceHolder::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val camera = param.thisObject as Camera
+                        val holder = param.args[0] as? SurfaceHolder
+                        val session = legacySessions.getOrPut(camera) { LegacyCameraSession() }
+                        if (holder == null) {
+                            clearLegacySession(session)
+                            return
+                        }
+                        val surface = holder.surface
+                        if (surface == null || !surface.isValid) {
+                            clearLegacySession(session)
+                            return
+                        }
+                        refreshSettings()
+                        session.attachedSurfaceTexture = null
+                        session.updatePreviewSurface(surface, ownsSurface = false)
+                        markLegacyPathActive(camera)
+                        val dummy = session.obtainDummySurfaceTexture()
+                        var replaced = false
+                        try {
+                            withSuppressedPreviewTexture {
+                                camera.setPreviewTexture(dummy)
+                            }
+                            replaced = true
+                        } catch (err: Throwable) {
+                            logVcam("Legacy setPreviewDisplay swap failed: ${err.message}")
+                        }
+                        if (replaced) {
+                            param.result = null
+                        }
+                    }
+                })
+
             XposedHelpers.findAndHookMethod(
                 cameraClass,
                 "takePicture",
@@ -122,10 +186,30 @@ object FakeFrameInjector {
                 }
             )
 
+            XposedHelpers.findAndHookMethod(cameraClass, "startPreview", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val camera = param.thisObject as Camera
+                    val session = legacySessions[camera] ?: return
+                    val surface = session.previewSurface
+                    if (surface != null && surface.isValid) {
+                        refreshSettings()
+                        startPainter(surface, session)
+                        markLegacyPathActive(camera)
+                    }
+                }
+            })
+
+            XposedHelpers.findAndHookMethod(cameraClass, "stopPreview", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val camera = param.thisObject as Camera
+                    legacySessions[camera]?.let { pauseLegacyPreview(it) }
+                }
+            })
+
             XposedHelpers.findAndHookMethod(cameraClass, "release", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val camera = param.thisObject as Camera
-                    legacySessions.remove(camera)
+                    legacySessions.remove(camera)?.let { clearLegacySession(it) }
                 }
             })
         } catch (err: Throwable) {
@@ -197,13 +281,91 @@ object FakeFrameInjector {
         return com.example.virtualcam.util.isPreviewSurface(surface) && !com.example.virtualcam.util.isImageReaderSurface(surface)
     }
 
-    private fun startPainter(targetSurface: Surface) {
-        painterThreads[targetSurface]?.interrupt()
+    private fun startPainter(targetSurface: Surface, session: LegacyCameraSession? = null) {
+        painterThreads.remove(targetSurface)?.interrupt()
         val fps = lastSettings?.fps ?: 30f
         val thread = GlSurfacePusher.start(targetSurface, {
-            fetchBitmap(1280, 720)
+            val width = session?.previewSize?.width?.takeIf { it > 0 }
+                ?: lastSettings?.manualWidth?.takeIf { it > 0 }
+                ?: 1280
+            val height = session?.previewSize?.height?.takeIf { it > 0 }
+                ?: lastSettings?.manualHeight?.takeIf { it > 0 }
+                ?: 720
+            fetchBitmap(width, height)
         }, fps)
         painterThreads[targetSurface] = thread
+    }
+
+    private inline fun <T> withSuppressedPreviewTexture(block: () -> T): T {
+        val previous = suppressPreviewTexture.get()
+        suppressPreviewTexture.set(true)
+        return try {
+            block()
+        } finally {
+            suppressPreviewTexture.set(previous)
+        }
+    }
+
+    private fun stopPainter(surface: Surface?) {
+        if (surface == null) return
+        painterThreads.remove(surface)?.interrupt()
+    }
+
+    private fun LegacyCameraSession.updatePreviewSurface(targetSurface: Surface, ownsSurface: Boolean) {
+        val previousSurface = previewSurface
+        val previousOwned = ownsPreviewSurface
+        if (previousSurface !== targetSurface) {
+            stopPainter(previousSurface)
+            if (previousOwned) {
+                runCatching { previousSurface?.release() }
+            }
+            previewSurface = targetSurface
+        }
+        ownsPreviewSurface = ownsSurface
+        startPainter(targetSurface, this)
+    }
+
+    private fun LegacyCameraSession.obtainDummySurfaceTexture(): SurfaceTexture {
+        val existing = dummySurfaceTexture
+        if (existing != null) {
+            return existing
+        }
+        val texture = SurfaceTexture(0)
+        texture.setDefaultBufferSize(16, 16)
+        dummySurfaceTexture = texture
+        return texture
+    }
+
+    private fun pauseLegacyPreview(session: LegacyCameraSession) {
+        stopPainter(session.previewSurface)
+    }
+
+    private fun clearLegacySession(session: LegacyCameraSession) {
+        pauseLegacyPreview(session)
+        if (session.ownsPreviewSurface) {
+            runCatching { session.previewSurface?.release() }
+        }
+        session.previewSurface = null
+        session.ownsPreviewSurface = false
+        session.attachedSurfaceTexture = null
+        session.dummySurfaceTexture?.let { runCatching { it.release() } }
+        session.dummySurfaceTexture = null
+        session.previewSize = Size(0, 0)
+    }
+
+    private fun markLegacyPathActive(camera: Camera) {
+        val previewSize = runCatching { camera.parameters?.previewSize }.getOrNull()
+        if (previewSize != null && previewSize.width > 0 && previewSize.height > 0) {
+            recordLegacySession(camera, previewSize.width, previewSize.height)
+        } else {
+            DiagnosticsState.update {
+                it.copy(
+                    activePath = "Legacy",
+                    frameFormat = lastSettings?.format?.storageValue ?: "NV21",
+                    requestedFps = lastSettings?.fps ?: 30f
+                )
+            }
+        }
     }
 
     private fun wrapPreviewCallback(camera: Camera, original: Camera.PreviewCallback): Camera.PreviewCallback {
@@ -392,6 +554,10 @@ object FakeFrameInjector {
 
     private class LegacyCameraSession {
         var previewSize: Size = Size(0, 0)
+        var previewSurface: Surface? = null
+        var ownsPreviewSurface: Boolean = false
+        var dummySurfaceTexture: SurfaceTexture? = null
+        var attachedSurfaceTexture: SurfaceTexture? = null
     }
 
     fun warmUp() {

@@ -8,7 +8,7 @@ import android.view.Surface
 import com.example.virtualcam.logVcam
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
-import java.lang.reflect.Array
+import java.lang.reflect.Array as ReflectArray
 import java.lang.reflect.Field
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
@@ -239,10 +239,10 @@ private class VirtualCamImageProxyHandler(
         }
         uBuffer.flip()
         vBuffer.flip()
-        val array = Array.newInstance(types.planeProxyClass, 3)
-        Array.set(array, 0, PlaneProxyHandler(types, yBuffer.asReadOnlyBuffer(), width, 1).proxy())
-        Array.set(array, 1, PlaneProxyHandler(types, uBuffer.asReadOnlyBuffer(), width / 2, 1).proxy())
-        Array.set(array, 2, PlaneProxyHandler(types, vBuffer.asReadOnlyBuffer(), width / 2, 1).proxy())
+        val array = ReflectArray.newInstance(types.planeProxyClass, 3)
+        ReflectArray.set(array, 0, PlaneProxyHandler(types, yBuffer.asReadOnlyBuffer(), width, 1).proxy())
+        ReflectArray.set(array, 1, PlaneProxyHandler(types, uBuffer.asReadOnlyBuffer(), width / 2, 1).proxy())
+        ReflectArray.set(array, 2, PlaneProxyHandler(types, vBuffer.asReadOnlyBuffer(), width / 2, 1).proxy())
         return array
     }
 

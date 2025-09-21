@@ -4,9 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
+import android.system.Os
 import androidx.core.content.edit
 import com.example.virtualcam.BuildConfig
 import com.example.virtualcam.logVcam
+import de.robv.android.xposed.XSharedPreferences
 import java.io.File
 
 // GREP: PREF_KEYS
@@ -104,38 +106,57 @@ data class ModuleSettings(
     val verbose: Boolean = false
 )
 
-class ModulePrefs private constructor(context: Context) {
-
-    // GREP: PREFS_DPS_WORLD_READABLE
-    private val baseContext: Context = context
-    private val dpsContext: Context = baseContext.createDeviceProtectedStorageContext()
-    private val prefs: SharedPreferences
+class ModulePrefs private constructor(
+    private val sharedPreferences: SharedPreferences?,
+    private val xSharedPreferences: XSharedPreferences?,
+    private val permissionContext: Context?
+) {
 
     init {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            dpsContext.moveSharedPreferencesFrom(baseContext, PrefKeys.PREF_FILE)
-        }
-        prefs = try {
-            @Suppress("DEPRECATION")
-            dpsContext.getSharedPreferences(PrefKeys.PREF_FILE, Context.MODE_WORLD_READABLE)
-        } catch (err: SecurityException) {
-            logVcam("ModulePrefs: MODE_WORLD_READABLE unsupported (${err.message}), falling back to MODE_PRIVATE")
-            dpsContext.getSharedPreferences(PrefKeys.PREF_FILE, Context.MODE_PRIVATE)
-        }
         ensureWorldReadable()
     }
 
     private fun ensureWorldReadable() {
-        val file = File(dpsContext.dataDir, "shared_prefs/${PrefKeys.PREF_FILE}.xml")
-        if (file.exists()) {
+        val context = permissionContext ?: return
+        val dataDir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            context.dataDir
+        } else {
+            @Suppress("DEPRECATION")
+            File(context.applicationInfo.dataDir)
+        }
+
+        val sharedPrefsDir = File(dataDir, "shared_prefs")
+        if (!sharedPrefsDir.exists() && !sharedPrefsDir.mkdirs()) {
+            logVcam("ModulePrefs: failed to create shared_prefs directory at ${sharedPrefsDir.path}")
+            return
+        }
+
+        setMode(dataDir, DIR_MODE)
+        setMode(sharedPrefsDir, DIR_MODE)
+
+        val prefsFile = File(sharedPrefsDir, "${PrefKeys.PREF_FILE}.xml")
+        if (prefsFile.exists()) {
+            setMode(prefsFile, FILE_MODE)
+        }
+    }
+
+    private fun setMode(file: File, mode: Int) {
+        if (!file.exists()) return
+        try {
+            Os.chmod(file.absolutePath, mode)
+            return
+        } catch (err: Throwable) {
             val readable = file.setReadable(true, false)
-            if (!readable) {
-                logVcam("ModulePrefs failed to mark prefs world-readable")
+            val writable = file.setWritable(true, true)
+            val executable = if (file.isDirectory) file.setExecutable(true, false) else true
+            if (!(readable && writable && executable)) {
+                logVcam("ModulePrefs: failed to adjust permissions for ${file.path}: ${err.message}")
             }
         }
     }
 
     fun read(): ModuleSettings {
+        val prefs = getReadablePrefs() ?: return ModuleSettings()
         val uriString = prefs.getString(PrefKeys.SOURCE_URI, null)
         return ModuleSettings(
             enabled = prefs.getBoolean(PrefKeys.ENABLED, false),
@@ -156,6 +177,10 @@ class ModulePrefs private constructor(context: Context) {
     }
 
     fun write(settings: ModuleSettings) {
+        val prefs = sharedPreferences ?: run {
+            logVcam("ModulePrefs: write requested from non-module process; ignoring")
+            return
+        }
         prefs.edit(commit = true) {
             putBoolean(PrefKeys.ENABLED, settings.enabled)
             putString(PrefKeys.SOURCE_TYPE, settings.sourceType.storageValue)
@@ -175,32 +200,63 @@ class ModulePrefs private constructor(context: Context) {
         ensureWorldReadable()
     }
 
+    private fun getReadablePrefs(): SharedPreferences? {
+        sharedPreferences?.let { return it }
+        val prefs = xSharedPreferences ?: run {
+            logVcam("ModulePrefs: preferences unavailable in this process")
+            return null
+        }
+        if (!prefs.reload()) {
+            logVcam("ModulePrefs: failed to reload XSharedPreferences")
+        }
+        return prefs
+    }
+
     companion object {
         @Volatile
         private var instance: ModulePrefs? = null
 
+        private const val DIR_MODE = 0b111001001 // 0o711
+        private const val FILE_MODE = 0b110100100 // 0o644
+
         fun getInstance(context: Context): ModulePrefs {
-            val moduleContext = resolveModuleContext(context)
             return instance ?: synchronized(this) {
-                instance ?: ModulePrefs(moduleContext).also { instance = it }
+                instance ?: create(context).also { instance = it }
             }
         }
 
-        private fun resolveModuleContext(context: Context): Context {
+        private fun create(context: Context): ModulePrefs {
             val appContext = context.applicationContext ?: context
-            if (appContext.packageName == BuildConfig.APPLICATION_ID) {
-                return appContext
+            return if (appContext.packageName == BuildConfig.APPLICATION_ID) {
+                createModuleInstance(appContext)
+            } else {
+                createRemoteInstance()
             }
-            return try {
-                val pkgContext = appContext.createPackageContext(
-                    BuildConfig.APPLICATION_ID,
-                    Context.CONTEXT_IGNORE_SECURITY
-                )
-                pkgContext.applicationContext ?: pkgContext
-            } catch (err: Exception) {
-                logVcam("ModulePrefs: createPackageContext failed (${err.message}); using caller context")
-                appContext
+        }
+
+        private fun createModuleInstance(context: Context): ModulePrefs {
+            val storageContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                context.createDeviceProtectedStorageContext().apply {
+                    moveSharedPreferencesFrom(context, PrefKeys.PREF_FILE)
+                }
+            } else {
+                context
             }
+            val prefs = storageContext.getSharedPreferences(PrefKeys.PREF_FILE, Context.MODE_PRIVATE)
+            return ModulePrefs(prefs, null, storageContext)
+        }
+
+        private fun createRemoteInstance(): ModulePrefs {
+            val prefs = try {
+                XSharedPreferences(BuildConfig.APPLICATION_ID, PrefKeys.PREF_FILE).apply {
+                    makeWorldReadable()
+                    reload()
+                }
+            } catch (err: Throwable) {
+                logVcam("ModulePrefs: failed to create XSharedPreferences (${err.message})")
+                null
+            }
+            return ModulePrefs(null, prefs, null)
         }
     }
 }

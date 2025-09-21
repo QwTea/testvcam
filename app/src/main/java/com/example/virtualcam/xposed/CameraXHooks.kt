@@ -28,8 +28,10 @@ object CameraXHooks {
 
     private fun hookImageAnalysis(classLoader: ClassLoader) {
         try {
-            val analysisClass = XposedHelpers.findClass("androidx.camera.core.ImageAnalysis", classLoader)
-            val analyzerInterface = Class.forName("androidx.camera.core.ImageAnalysis\$Analyzer", false, classLoader)
+            val analysisClass =
+                XposedHelpers.findClass("androidx.camera.core.ImageAnalysis", classLoader)
+            val analyzerInterface =
+                Class.forName("androidx.camera.core.ImageAnalysis\$Analyzer", false, classLoader)
             XposedHelpers.findAndHookMethod(
                 analysisClass,
                 "setAnalyzer",
@@ -45,7 +47,8 @@ object CameraXHooks {
                             if (method.name == "analyze" && args != null && args.isNotEmpty()) {
                                 val imageProxy = args[0] as ImageProxy
                                 FakeFrameInjector.warmUp()
-                                val data = FakeFrameInjector.provideNv21(imageProxy.width, imageProxy.height)
+                                val data =
+                                    FakeFrameInjector.provideNv21(imageProxy.width, imageProxy.height)
                                 val fake = if (data != null) {
                                     VirtualCamImageProxy.fromNv21(
                                         imageProxy.width,
@@ -81,8 +84,13 @@ object CameraXHooks {
 
     private fun hookImageCapture(classLoader: ClassLoader) {
         try {
-            val captureClass = XposedHelpers.findClass("androidx.camera.core.ImageCapture", classLoader)
-            val callbackInterface = Class.forName("androidx.camera.core.ImageCapture\$OnImageCapturedCallback", false, classLoader)
+            val captureClass =
+                XposedHelpers.findClass("androidx.camera.core.ImageCapture", classLoader)
+            val callbackInterface = Class.forName(
+                "androidx.camera.core.ImageCapture\$OnImageCapturedCallback",
+                false,
+                classLoader
+            )
             XposedHelpers.findAndHookMethod(
                 captureClass,
                 "takePicture",
@@ -91,7 +99,8 @@ object CameraXHooks {
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         val callback = param.args[1]
-                        val method = callbackInterface.getMethod("onCaptureSuccess", ImageProxy::class.java)
+                        val method =
+                            callbackInterface.getMethod("onCaptureSuccess", ImageProxy::class.java)
                         val proxy = Proxy.newProxyInstance(
                             classLoader,
                             arrayOf(callbackInterface)
@@ -99,21 +108,27 @@ object CameraXHooks {
                             if (methodInvoked.name == "onCaptureSuccess") {
                                 FakeFrameInjector.warmUp()
                                 val settings = FakeFrameInjector.currentSettings()
-                                val width =  settings?.manualWidth ?: 1280
+                                val width = settings?.manualWidth ?: 1280
                                 val height = settings?.manualHeight ?: 720
                                 val data = FakeFrameInjector.provideNv21(width, height)
                                 val fake = if (data != null) {
-                                    VirtualCamImageProxy.fromNv21(width, height, System.currentTimeMillis() * 1000, data)
+                                    VirtualCamImageProxy.fromNv21(
+                                        width,
+                                        height,
+                                        System.currentTimeMillis() * 1000,
+                                        data
+                                    )
                                 } else {
                                     args?.get(0) as? ImageProxy
                                 }
                                 DiagnosticsState.update {
-                                    it.copy(activePath = "CameraX", previewSize = "${width}x${height}")
+                                    it.copy(
+                                        activePath = "CameraX",
+                                        previewSize = "${width}x${height}"
+                                    )
                                 }
                                 method.invoke(callback, fake)
                                 null
-                            } else if (methodInvoked.name == "onError") {
-                                methodInvoked.invoke(callback, *(args ?: emptyArray()))
                             } else {
                                 methodInvoked.invoke(callback, *(args ?: emptyArray()))
                             }
@@ -143,10 +158,18 @@ object CameraXHooks {
                         if (settings?.injectCam2Preview != true) return
                         val originalSurface = param.args[0] as Surface
                         val dummy = com.example.virtualcam.util.makeDummySurface()
-                        com.example.virtualcam.util.startSurfacePainter(originalSurface, {
-                            FakeFrameInjector.acquireBitmap(1280, 720)
-                        }, settings.fps)
-                        DiagnosticsState.update { it.copy(activePath = "CameraX", frameFormat = "Preview", requestedFps = settings.fps) }
+                        com.example.virtualcam.util.startSurfacePainter(
+                            originalSurface,
+                            { FakeFrameInjector.acquireBitmap(1280, 720) },
+                            settings.fps
+                        )
+                        DiagnosticsState.update {
+                            it.copy(
+                                activePath = "CameraX",
+                                frameFormat = "Preview",
+                                requestedFps = settings.fps
+                            )
+                        }
                         param.args[0] = dummy
                     }
                 }
@@ -164,11 +187,8 @@ private class VirtualCamImageProxy(
     private val planes: Array<ImageProxy.PlaneProxy>
 ) : ImageProxy {
     override fun close() {}
-
     override fun getWidth(): Int = width
-
     override fun getHeight(): Int = height
-
     override fun getImage(): Image? = null
 
     override fun getImageInfo(): ImageProxy.ImageInfo = object : ImageProxy.ImageInfo {
@@ -179,11 +199,8 @@ private class VirtualCamImageProxy(
     }
 
     override fun getPlanes(): Array<ImageProxy.PlaneProxy> = planes
-
     override fun getFormat(): Int = ImageFormat.YUV_420_888
-
     override fun getCropRect(): Rect = Rect(0, 0, width, height)
-
     override fun setCropRect(rect: Rect?) {}
 
     companion object {
@@ -192,8 +209,10 @@ private class VirtualCamImageProxy(
             val uvSize = ySize / 2
             val yBuffer = ByteBuffer.allocateDirect(ySize)
             yBuffer.put(data, 0, ySize)
+
             val uBuffer = ByteBuffer.allocateDirect(uvSize / 2)
             val vBuffer = ByteBuffer.allocateDirect(uvSize / 2)
+
             var offset = ySize
             while (offset < data.size) {
                 val v = data[offset]
@@ -202,14 +221,17 @@ private class VirtualCamImageProxy(
                 uBuffer.put(u)
                 offset += 2
             }
+
             yBuffer.flip()
             uBuffer.flip()
             vBuffer.flip()
+
             val planes = arrayOf<ImageProxy.PlaneProxy>(
                 SimplePlaneProxy(yBuffer.asReadOnlyBuffer(), width, 1),
                 SimplePlaneProxy(uBuffer.asReadOnlyBuffer(), width / 2, 1),
                 SimplePlaneProxy(vBuffer.asReadOnlyBuffer(), width / 2, 1)
             )
+
             return VirtualCamImageProxy(width, height, timestampUs, planes)
         }
     }
@@ -221,8 +243,6 @@ private class SimplePlaneProxy(
     private val pixelStride: Int
 ) : ImageProxy.PlaneProxy {
     override fun getBuffer(): ByteBuffer = buffer.duplicate()
-
     override fun getRowStride(): Int = rowStride
-
     override fun getPixelStride(): Int = pixelStride
 }

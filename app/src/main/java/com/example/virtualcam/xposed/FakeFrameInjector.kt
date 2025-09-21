@@ -20,6 +20,7 @@ import com.example.virtualcam.prefs.OrientationOption
 import com.example.virtualcam.prefs.SourceType
 import com.example.virtualcam.util.ExifUtil
 import com.example.virtualcam.util.SizeUtil
+import com.example.virtualcam.util.SourceUriResolver
 import com.example.virtualcam.util.applyOrientationAndMirror
 import com.example.virtualcam.util.bitmapToJpeg
 import com.example.virtualcam.util.bitmapToNV21
@@ -449,11 +450,20 @@ object FakeFrameInjector {
 
     private fun configure(context: Context, settings: ModuleSettings) {
         releaseResources()
+        val resolvedUri = SourceUriResolver.resolve(context, settings.sourceUri)
         when (settings.sourceType) {
-            SourceType.IMAGE -> settings.sourceUri?.let { loadBitmap(context, it, settings) }
+            SourceType.IMAGE -> if (resolvedUri != null) {
+                loadBitmap(context, resolvedUri, settings)
+            } else {
+                logVcam("configure: unable to access image source")
+                return
+            }
             SourceType.VIDEO -> {
-                val uri = settings.sourceUri ?: return
-                videoDecoder = VideoDecoder(context, uri, settings.videoMode, settings.fps).also { it.start() }
+                if (resolvedUri == null) {
+                    logVcam("configure: unable to access video source")
+                    return
+                }
+                videoDecoder = VideoDecoder(context, resolvedUri, settings.videoMode, settings.fps).also { it.start() }
             }
         }
         DiagnosticsState.update {

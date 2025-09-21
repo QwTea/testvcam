@@ -8,6 +8,8 @@ import androidx.core.content.edit
 import com.example.virtualcam.logVcam
 import java.io.File
 
+private const val MODULE_PACKAGE = "com.example.virtualcam"
+
 // GREP: PREF_KEYS
 object PrefKeys {
     const val PREF_FILE = "virtualcam_prefs"
@@ -106,16 +108,21 @@ data class ModuleSettings(
 class ModulePrefs private constructor(context: Context) {
 
     // GREP: PREFS_DPS_WORLD_READABLE
-    private val dpsContext: Context = context.createDeviceProtectedStorageContext()
+    private val baseContext: Context = context
+    private val dpsContext: Context = baseContext.createDeviceProtectedStorageContext()
     private val prefs: SharedPreferences
 
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            dpsContext.moveSharedPreferencesFrom(context, PrefKeys.PREF_FILE)
+            dpsContext.moveSharedPreferencesFrom(baseContext, PrefKeys.PREF_FILE)
         }
-        @Suppress("DEPRECATION")
-        val mode = Context.MODE_WORLD_READABLE
-        prefs = dpsContext.getSharedPreferences(PrefKeys.PREF_FILE, mode)
+        prefs = try {
+            @Suppress("DEPRECATION")
+            dpsContext.getSharedPreferences(PrefKeys.PREF_FILE, Context.MODE_WORLD_READABLE)
+        } catch (err: SecurityException) {
+            logVcam("ModulePrefs: MODE_WORLD_READABLE unsupported (${err.message}), falling back to MODE_PRIVATE")
+            dpsContext.getSharedPreferences(PrefKeys.PREF_FILE, Context.MODE_PRIVATE)
+        }
         ensureWorldReadable()
     }
 
@@ -174,8 +181,26 @@ class ModulePrefs private constructor(context: Context) {
         private var instance: ModulePrefs? = null
 
         fun getInstance(context: Context): ModulePrefs {
+            val moduleContext = resolveModuleContext(context)
             return instance ?: synchronized(this) {
-                instance ?: ModulePrefs(context.applicationContext).also { instance = it }
+                instance ?: ModulePrefs(moduleContext).also { instance = it }
+            }
+        }
+
+        private fun resolveModuleContext(context: Context): Context {
+            val appContext = context.applicationContext ?: context
+            if (appContext.packageName == MODULE_PACKAGE) {
+                return appContext
+            }
+            return try {
+                val pkgContext = appContext.createPackageContext(
+                    MODULE_PACKAGE,
+                    Context.CONTEXT_IGNORE_SECURITY
+                )
+                pkgContext.applicationContext ?: pkgContext
+            } catch (err: Exception) {
+                logVcam("ModulePrefs: createPackageContext failed (${err.message}); using caller context")
+                appContext
             }
         }
     }
